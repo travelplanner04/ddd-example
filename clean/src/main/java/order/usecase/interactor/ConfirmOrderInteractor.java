@@ -53,7 +53,10 @@ public class ConfirmOrderInteractor implements ConfirmOrderInputBoundary {
             throw new OrderAlreadyExistsException(id);
         }
 
-        // 3. Reserve stock for each item (using Product's Use Case directly - pragmatic approach)
+        // 3. Reserve stock for each item
+        // CROSS-DOMAIN CALL (GEWÜNSCHT für Demo-Zwecke):
+        // Nutzt Product's Use Case direkt. Dies zeigt die pragmatische
+        // Cross-Context-Kommunikation über Input Boundary Interfaces in Clean Architecture.
         order.getItems().forEach(item -> {
             reserveStockUseCase.execute(
                     item.getProductId().getValue(),

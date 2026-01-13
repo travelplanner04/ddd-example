@@ -4,26 +4,33 @@ import java.util.Objects;
 
 /**
  * Entity representing an item within an Order.
+ *
+ * DDD: Immutable - alle Felder sind final. Änderungen erzeugen neue Instanzen.
  */
 public class OrderItem {
 
     private final ProductId productId;
-    private Quantity quantity;
-    private Money price;
+    private final Quantity quantity;
+    private final Money price;
 
-    public OrderItem(ProductId productId, Quantity quantity, Money price) {
-        if (productId == null) {
-            throw new IllegalArgumentException("ProductId cannot be null");
-        }
-        if (quantity == null) {
-            throw new IllegalArgumentException("Quantity cannot be null");
-        }
-        if (price == null) {
-            throw new IllegalArgumentException("Price cannot be null");
-        }
-        this.productId = productId;
-        this.quantity = quantity;
-        this.price = price;
+    private OrderItem(ProductId productId, Quantity quantity, Money price) {
+        this.productId = Objects.requireNonNull(productId, "ProductId cannot be null");
+        this.quantity = Objects.requireNonNull(quantity, "Quantity cannot be null");
+        this.price = Objects.requireNonNull(price, "Price cannot be null");
+    }
+
+    /**
+     * Factory für neue OrderItems.
+     */
+    public static OrderItem create(ProductId productId, Quantity quantity, Money price) {
+        return new OrderItem(productId, quantity, price);
+    }
+
+    /**
+     * Factory für Rekonstruktion aus Persistenz.
+     */
+    public static OrderItem reconstitute(ProductId productId, Quantity quantity, Money price) {
+        return new OrderItem(productId, quantity, price);
     }
 
     public ProductId getProductId() {
@@ -38,12 +45,20 @@ public class OrderItem {
         return price;
     }
 
-    public void updateQuantity(Quantity newQuantity) {
-        this.quantity = newQuantity;
+    /**
+     * Erzeugt neues OrderItem mit aktualisierter Quantity.
+     * DDD: Immutable - gibt neue Instanz zurück statt zu mutieren.
+     */
+    public OrderItem withQuantity(Quantity newQuantity) {
+        return new OrderItem(this.productId, newQuantity, this.price);
     }
 
-    public void updatePrice(Money newPrice) {
-        this.price = newPrice;
+    /**
+     * Erzeugt neues OrderItem mit aktualisiertem Preis.
+     * DDD: Immutable - gibt neue Instanz zurück statt zu mutieren.
+     */
+    public OrderItem withPrice(Money newPrice) {
+        return new OrderItem(this.productId, this.quantity, newPrice);
     }
 
     public Money calculateTotal() {

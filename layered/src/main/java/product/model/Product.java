@@ -57,6 +57,9 @@ public class Product {
             throw new InsufficientStockException(this.id, quantity, this.stockQuantity);
         }
         this.stockQuantity -= quantity;
+
+        // PSEUDO-CODE: Repräsentiert Domain Event / Action die in Produktion
+        // über einen EventPublisher publiziert würde: publish(new StockReservedEvent(...))
         System.out.printf("[PRODUCT] Stock reserved: %s, qty: %d, remaining: %d%n",
             name.value(), quantity, stockQuantity);
     }
@@ -66,6 +69,9 @@ public class Product {
      */
     public void releaseStock(int quantity) {
         this.stockQuantity += quantity;
+
+        // PSEUDO-CODE: Repräsentiert Domain Event / Action die in Produktion
+        // über einen EventPublisher publiziert würde: publish(new StockReleasedEvent(...))
         System.out.printf("[PRODUCT] Stock released: %s, qty: %d, now: %d%n",
             name.value(), quantity, stockQuantity);
     }

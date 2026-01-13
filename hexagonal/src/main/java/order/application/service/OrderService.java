@@ -98,6 +98,8 @@ public class OrderService implements GetOrderUseCase, UpdateOrderUseCase, Confir
     }
 
     private void printProductManufacturers(Order order) {
+        // PSEUDO-CODE: Repräsentiert Logging/Audit-Action die in Produktion
+        // über einen Logger oder AuditService erfolgen würde
         System.out.println("[ORDER CONFIRM] Produkte in Bestellung " + order.getId().value() + ":");
         for (OrderItem item : order.getItems()) {
             loadProductInfoPort.loadProductInfo(item.getProductId())
@@ -113,10 +115,14 @@ public class OrderService implements GetOrderUseCase, UpdateOrderUseCase, Confir
     /**
      * Reserviert Lagerbestand für alle Produkte der Bestellung.
      *
-     * PRAGMATISCH: Nutzt Product's ReserveStockUseCase direkt.
-     * Product's InsufficientStockException wird durchgereicht - keine Übersetzung!
+     * CROSS-DOMAIN CALL (GEWÜNSCHT für Demo-Zwecke):
+     * Nutzt Product's ReserveStockUseCase direkt. Dies zeigt die pragmatische
+     * Cross-Context-Kommunikation über Use Case Interfaces.
+     * Product's InsufficientStockException wird durchgereicht - in Produktion
+     * würde man diese ggf. in eine Order-spezifische Exception übersetzen.
      */
     private void reserveStockForOrder(Order order) {
+        // PSEUDO-CODE: Logging-Action
         System.out.println("[ORDER SERVICE] Reserviere Lagerbestand für Order " + order.getId().value());
 
         for (OrderItem item : order.getItems()) {

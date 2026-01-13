@@ -88,6 +88,8 @@ public class OrderService {
     }
 
     private void printProductManufacturers(Order order) {
+        // PSEUDO-CODE: Repräsentiert Logging/Audit-Action die in Produktion
+        // über einen Logger oder AuditService erfolgen würde
         System.out.println("[ORDER CONFIRM] Produkte in Bestellung " + order.getId().value() + ":");
         for (OrderItem item : order.getItems()) {
             // Direkter Zugriff auf ProductRepository (Layered Style)
@@ -107,15 +109,18 @@ public class OrderService {
     /**
      * Reserviert Lagerbestand für alle Produkte der Bestellung.
      *
+     * CROSS-DOMAIN CALL (GEWÜNSCHT für Demo-Zwecke):
      * LAYERED ARCHITECTURE - CROSS-MODULE INTERACTION:
      * - DIREKTER Zugriff auf Product's Repository (konkrete Klasse!)
      * - DIREKTER Aufruf von Product's Domain-Logik (reserveStock)
      * - KEINE Abstraktion, KEINE Ports, KEINE Interfaces!
      *
+     * Dies demonstriert bewusst die direkte Kopplung in Layered Architecture.
      * Vorteile: Einfach, weniger Code
      * Nachteile: Enge Kopplung, schwer testbar, schwer austauschbar
      */
     private void reserveStockForOrder(Order order) {
+        // PSEUDO-CODE: Logging-Action
         System.out.println("[ORDER SERVICE] Reserviere Lagerbestand für Order " + order.getId().value());
 
         for (OrderItem item : order.getItems()) {

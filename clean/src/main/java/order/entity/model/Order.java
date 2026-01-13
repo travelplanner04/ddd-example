@@ -58,17 +58,21 @@ public class Order {
 
     /**
      * Adds an item to the order or updates quantity if product already exists.
+     * DDD: Ersetzt existierendes Item durch neue Instanz (Immutability).
      */
     public void addItem(ProductId productId, Quantity quantity, Money price) {
         ensureModifiable();
 
         Optional<OrderItem> existingItem = findItemByProductId(productId);
         if (existingItem.isPresent()) {
-            OrderItem item = existingItem.get();
-            item.updateQuantity(item.getQuantity().add(quantity));
-            item.updatePrice(price);
+            OrderItem oldItem = existingItem.get();
+            OrderItem newItem = oldItem
+                .withQuantity(oldItem.getQuantity().add(quantity))
+                .withPrice(price);
+            items.remove(oldItem);
+            items.add(newItem);
         } else {
-            items.add(new OrderItem(productId, quantity, price));
+            items.add(OrderItem.create(productId, quantity, price));
         }
     }
 
@@ -82,12 +86,16 @@ public class Order {
 
     /**
      * Updates the quantity of an existing item.
+     * DDD: Ersetzt existierendes Item durch neue Instanz (Immutability).
      */
     public void updateItemQuantity(ProductId productId, Quantity newQuantity) {
         ensureModifiable();
 
-        findItemByProductId(productId)
-                .ifPresent(item -> item.updateQuantity(newQuantity));
+        findItemByProductId(productId).ifPresent(oldItem -> {
+            OrderItem newItem = oldItem.withQuantity(newQuantity);
+            items.remove(oldItem);
+            items.add(newItem);
+        });
     }
 
     /**
