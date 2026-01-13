@@ -1,12 +1,30 @@
 # Von Layered zu Hexagonal Architecture - Ein Tutorial
 
-Dieses Tutorial erklärt **Hexagonal Architecture (Ports & Adapters)** ausgehend von der bekannten **Layered Architecture**. Du lernst, was Ports und Adapter sind und warum diese Architektur besonders flexibel ist.
+Dieses Tutorial erklärt **Hexagonal Architecture (Ports & Adapters)** Schritt für Schritt, ausgehend von der bekannten **Layered Architecture**. Am Ende wirst du verstehen, warum Hexagonal existiert und wie du es anwendest.
 
 ---
 
-## Wichtig vorab: Hexagonal vs Onion vs Clean
+## Wichtig vorab: Was dieses Tutorial zeigt (und was nicht)
 
-### Die Familie
+### Was wir vergleichen
+
+```mermaid
+graph LR
+    subgraph "Dieses Tutorial"
+        A["Typisches Layered<br/>(wie oft in Spring Boot)"] --> B["Hexagonal Architecture"]
+    end
+```
+
+### Was du wissen solltest
+
+| Aussage | Erklärung |
+|---------|-----------|
+| **Layered ≠ schlecht** | Layered Architecture ist valide und kann sauber umgesetzt werden |
+| **Layered kann Interfaces haben** | Man KANN in Layered Interfaces nutzen - viele tun es nur nicht |
+| **Hexagonal/Onion/Clean sind verwandt** | Alle basieren auf dem gleichen Prinzip: **Dependency Inversion** |
+| **Der echte Unterschied** | Nicht "Interface vs. keine Interface", sondern **wohin zeigen die Abhängigkeiten?** |
+
+### Hexagonal vs Onion vs Clean
 
 ```mermaid
 graph LR
@@ -27,53 +45,66 @@ graph LR
 | **Onion** | Konzentrische Schichten | Core, Domain Services, Application, Infrastructure |
 | **Clean** | Use Cases explizit | Entity, Use Case, Interface Adapter, Framework |
 
-**Alle drei** setzen auf: Domain im Zentrum, Abhängigkeiten nach innen.
-
-> **Tipp:** Wenn du [tutorialOnion.md](tutorialOnion.md) gelesen hast, wird vieles bekannt vorkommen.
-> Der Hauptunterschied ist die **Terminologie** und der **Fokus auf Ports**.
+> **Merke:** Der Kern-Unterschied zwischen Layered und Hexagonal ist nicht "Interfaces ja/nein",
+> sondern **wer definiert die Interfaces** und **in welche Richtung zeigen Abhängigkeiten**.
 
 ---
 
 ## Inhaltsverzeichnis
 
 0. [Das Demo-Szenario](#0-das-demo-szenario)
-1. [Die Kernidee: Ports & Adapters](#1-die-kernidee-ports--adapters)
-2. [Primary vs Secondary](#2-primary-vs-secondary)
-3. [Von Layered zu Hexagonal](#3-von-layered-zu-hexagonal)
-4. [Die Ports im Detail](#4-die-ports-im-detail)
-5. [Die Adapter im Detail](#5-die-adapter-im-detail)
-6. [Code-Vergleich: Layered vs Hexagonal](#6-code-vergleich-layered-vs-hexagonal)
+1. [Ausgangspunkt: Layered Architecture](#1-ausgangspunkt-layered-architecture)
+2. [Häufige Probleme in typischem Layered](#2-häufige-probleme-in-typischem-layered)
+3. [Die Kernidee von Hexagonal](#3-die-kernidee-von-hexagonal)
+4. [Schicht für Schicht: Der Umbau](#4-schicht-für-schicht-der-umbau)
+5. [Code-Vergleich: Vorher/Nachher](#5-code-vergleich-vorhernachher)
+6. [Die Dependency Rule](#6-die-dependency-rule)
 7. [Praktisches Beispiel: Order bestätigen](#7-praktisches-beispiel-order-bestätigen)
-8. [Wann Hexagonal verwenden?](#8-wann-hexagonal-verwenden)
-9. [Zusammenfassung](#9-zusammenfassung)
+8. [Zusammenfassung](#8-zusammenfassung)
+9. [Wie Hexagonal die Probleme löst](#9-wie-hexagonal-die-probleme-löst)
 
 ---
 
 ## 0. Das Demo-Szenario
 
-Wir nutzen dasselbe Szenario wie in [tutorialOnion.md](tutorialOnion.md):
+Bevor wir in die Architektur einsteigen, hier das **Beispiel-Szenario**, das wir verwenden:
 
 ### Die Domäne: Ein Bestellsystem
 
+Wir bauen ein einfaches **E-Commerce Backend** mit zwei Bereichen:
+
 ```mermaid
 graph LR
-    subgraph Order ["ORDER"]
+    subgraph Order ["ORDER (Bestellungen)"]
         O[Order]
         OI[OrderItem]
         OC[OrderConfirmation]
     end
 
-    subgraph Product ["PRODUCT"]
+    subgraph Product ["PRODUCT (Produkte)"]
         P[Product]
         Stock[Lagerbestand]
     end
 
     O -->|"enthält"| OI
     OI -->|"referenziert"| P
-    O -->|"erzeugt"| OC
+    O -->|"erzeugt bei Bestätigung"| OC
+    OC -->|"reserviert"| Stock
 ```
 
+### Die Geschäftsobjekte
+
+| Objekt | Beschreibung |
+|--------|--------------|
+| **Order** | Eine Bestellung mit Status (DRAFT → CONFIRMED) |
+| **OrderItem** | Position in der Bestellung (Produkt + Menge + Preis) |
+| **OrderConfirmation** | Bestätigungsdetails (Summe, Steuer, Versand) |
+| **Product** | Artikel im Katalog mit Lagerbestand |
+| **Money** | Geldbetrag (Value Object) |
+
 ### Der zentrale Use Case: Order bestätigen
+
+Das Tutorial fokussiert auf den **komplexesten Use Case** - eine Bestellung bestätigen:
 
 ```mermaid
 flowchart LR
@@ -87,94 +118,228 @@ flowchart LR
     style D fill:#c8e6c9
 ```
 
+**Was passiert dabei?**
+
+1. **Order laden** - Aus der Datenbank holen
+2. **Externes System prüfen** - Gibt es die Order schon woanders?
+3. **Lagerbestand reservieren** - Im Product-Modul Stock abziehen
+4. **Order bestätigen** - Status auf CONFIRMED setzen
+5. **Bestätigung berechnen** - Summe + Steuer + Versand
+6. **Speichern** - Order und Confirmation in DB
+7. **Email senden** - Kunde benachrichtigen
+
+> Im Folgenden siehst du, wie **derselbe Use Case** in Layered vs. Hexagonal aussieht.
+
 ---
 
-## 1. Die Kernidee: Ports & Adapters
+## 1. Ausgangspunkt: Layered Architecture
 
-### Das Hexagon
+Die meisten Entwickler kennen Layered Architecture - sie ist der "Standard":
+
+```mermaid
+graph TB
+    subgraph "LAYERED ARCHITECTURE"
+        direction TB
+        P["🖥️ Presentation Layer<br/>(Controller)"]
+        S["⚙️ Service Layer<br/>(Business Logic)"]
+        R["💾 Repository Layer<br/>(Data Access)"]
+        M["📦 Model Layer<br/>(Entities, DTOs)"]
+
+        P --> S
+        S --> R
+        R --> M
+    end
+
+    style P fill:#e3f2fd
+    style S fill:#fff3e0
+    style R fill:#f3e5f5
+    style M fill:#e8f5e9
+```
+
+### So sieht das in unserem Projekt aus:
+
+**Dateistruktur** ([layered/](layered/)):
+```
+layered/src/main/java/order/
+├── presentation/          ← Presentation Layer
+│   └── OrderController.java
+├── service/               ← Service Layer
+│   ├── OrderService.java
+│   └── EmailService.java
+├── repository/            ← Repository Layer
+│   └── OrderRepository.java
+└── model/                 ← Model Layer
+    ├── Order.java
+    └── Money.java
+```
+
+### Der typische Code-Fluss:
+
+```mermaid
+sequenceDiagram
+    participant C as Controller
+    participant S as Service
+    participant R as Repository
+    participant DB as Database
+
+    C->>S: confirmOrder(id)
+    S->>R: findById(id)
+    R->>DB: SELECT * FROM orders
+    DB-->>R: Row Data
+    R-->>S: Order
+    S->>S: order.confirm()
+    S->>R: save(order)
+    R->>DB: UPDATE orders
+    S-->>C: Response
+```
+
+**Code-Referenz:** [layered/.../OrderService.java](layered/src/main/java/order/service/OrderService.java) (Zeile 58)
+
+```java
+public OrderConfirmationResponse confirmOrder(OrderId orderId) {
+    Order order = findOrder(orderId);           // ← Holt aus Repository
+    order.confirm();                            // ← Business Logic
+    orderRepository.save(order);                // ← Speichert zurück
+    return mapper.toResponse(savedConfirmation);
+}
+```
+
+**Das funktioniert** - aber es gibt häufige Probleme...
+
+---
+
+## 2. Häufige Probleme in typischem Layered
+
+> **Hinweis:** Diese Probleme sind nicht zwingend in Layered - aber sie passieren oft,
+> weil Layered diese Fehler nicht aktiv verhindert. Sauberes Layered ist möglich!
+>
+> Die Probleme sind identisch zu [tutorialOnion.md](tutorialOnion.md#2-häufige-probleme-in-typischem-layered) - hier eine Kurzfassung:
+
+<a id="problem-1-layered"></a>
+### Problem 1: Abhängigkeiten zeigen nach UNTEN (zur Infrastruktur)
+[→ Wie Hexagonal das löst](#lösung-1-abhängigkeiten-zeigen-nach-innen)
+
+```mermaid
+graph TB
+    subgraph "TYPISCH: Abhängigkeiten nach unten"
+        P[Presentation] -->|"hängt ab von"| S[Service]
+        S -->|"hängt ab von"| R[Repository]
+        R -->|"hängt ab von"| DB[(Database)]
+    end
+
+    style DB fill:#ffcdd2,stroke:#c62828
+```
+
+<a id="problem-2-layered"></a>
+### Problem 2: Domain ist "unten" statt "zentral"
+[→ Wie Hexagonal das löst](#lösung-2-business-logic-ist-der-kern)
+
+```
+Presentation  ← "oben"
+    ↓
+Service
+    ↓
+Repository
+    ↓
+Model         ← "unten" (Domain ist Fundament, nicht Zentrum)
+```
+
+<a id="problem-3-layered"></a>
+### Problem 3: Keine erzwungenen Verträge
+[→ Wie Hexagonal das löst](#lösung-3-ports-definieren-klare-verträge)
+
+```java
+public class OrderService {
+    private final OrderRepository orderRepository;  // Interface? Klasse? Wer weiß...
+    private final EmailService emailService;
+}
+```
+
+<a id="problem-4-layered"></a>
+### Problem 4: Austauschen kann teuer sein
+[→ Wie Hexagonal das löst](#lösung-4-adapter-sind-austauschbar)
+
+Was wenn du die Datenbank wechseln oder den Email-Provider ändern willst?
+
+<a id="problem-5-layered"></a>
+### Problem 5: Use Cases sind nicht explizit
+[→ Wie Hexagonal das löst](#lösung-5-input-ports-machen-use-cases-explizit)
+
+```java
+// Layered: Ein großer Service mit vielen Methoden
+public class OrderService {
+    public OrderResponse getOrder(...) { }
+    public OrderResponse updateOrder(...) { }
+    public OrderConfirmationResponse confirmOrder(...) { }
+    // + 20 weitere Methoden...
+}
+```
+
+---
+
+## 3. Die Kernidee von Hexagonal
+
+### Die Revolution: Das Hexagon mit Ports!
 
 Stell dir deine Anwendung als **Sechseck (Hexagon)** vor - mit Öffnungen (Ports) nach außen:
 
 ```mermaid
 graph TB
     subgraph Hexagon ["🔷 DEINE ANWENDUNG"]
-        Core["Domain<br/>+ Application"]
+        subgraph Application ["Application"]
+            IP["Input Ports<br/>(Use Cases)"]
+            Service["Service"]
+            OP["Output Ports<br/>(Repository etc.)"]
+        end
+
+        subgraph Domain ["Domain"]
+            Entities["Entities, Value Objects"]
+        end
+
+        IP --> Service
+        Service --> OP
+        Service --> Domain
     end
 
     subgraph External ["Externe Welt"]
         UI["🖥️ Web UI"]
-        CLI["⌨️ CLI"]
         DB[(💾 Database)]
         Email["📧 Email"]
-        API["🌐 External API"]
     end
 
-    UI -->|"Port"| Core
-    CLI -->|"Port"| Core
-    Core -->|"Port"| DB
-    Core -->|"Port"| Email
-    Core -->|"Port"| API
+    UI -->|"Primary Adapter"| IP
+    OP -->|"Secondary Adapter"| DB
+    OP -->|"Secondary Adapter"| Email
 
-    style Core fill:#c8e6c9,stroke:#388e3c,stroke-width:3px
+    style Domain fill:#c8e6c9,stroke:#388e3c,stroke-width:3px
+    style Application fill:#fff9c4
 ```
 
 ### Was sind Ports?
 
 > **Port = Interface** - Eine definierte Schnittstelle, über die die Anwendung kommuniziert.
 
-```java
-// Das ist ein PORT - ein Interface
-public interface LoadOrderPort {
-    Optional<Order> loadById(OrderId orderId);
-}
-```
+Es gibt zwei Arten:
+
+| Port-Typ | Richtung | Beispiel |
+|----------|----------|----------|
+| **Input Port** | Rein (wer ruft uns auf?) | `ConfirmOrderUseCase` |
+| **Output Port** | Raus (wen rufen wir auf?) | `LoadOrderPort`, `SendNotificationPort` |
 
 ### Was sind Adapter?
 
 > **Adapter = Implementierung** - Die konkrete Anbindung an die externe Technologie.
 
-```java
-// Das ist ein ADAPTER - eine Implementierung
-public class OrderPersistenceAdapter implements LoadOrderPort {
-    @Override
-    public Optional<Order> loadById(OrderId orderId) {
-        // Echte DB-Logik hier
-    }
-}
-```
+| Adapter-Typ | Funktion | Beispiel |
+|-------------|----------|----------|
+| **Primary Adapter** | Ruft Input Ports auf | `OrderController` |
+| **Secondary Adapter** | Implementiert Output Ports | `OrderPersistenceAdapter` |
 
-### Das Bild
-
-```mermaid
-graph LR
-    subgraph Application ["Application"]
-        Port["«interface»<br/>LoadOrderPort"]
-    end
-
-    subgraph Adapter ["Adapter"]
-        Impl["OrderPersistenceAdapter"]
-        DB[(Database)]
-    end
-
-    Impl -.->|"implements"| Port
-    Impl --> DB
-
-    style Port fill:#fff9c4
-    style Impl fill:#e3f2fd
-```
-
----
-
-## 2. Primary vs Secondary
-
-### Zwei Arten von Ports
-
-Hexagonal unterscheidet zwischen **zwei Richtungen**:
+### Primary vs Secondary
 
 ```mermaid
 graph LR
     subgraph Primary ["PRIMARY (Driving)"]
-        direction TB
         UI["Web UI"]
         CLI["CLI"]
         Test["Tests"]
@@ -187,7 +352,6 @@ graph LR
     end
 
     subgraph Secondary ["SECONDARY (Driven)"]
-        direction TB
         DB[(Database)]
         Email["Email"]
         API["External API"]
@@ -201,132 +365,156 @@ graph LR
     style App fill:#c8e6c9
 ```
 
-### Primary (Driving) - "Wer treibt die Anwendung?"
-
-| Begriff | Bedeutung | Beispiele |
-|---------|-----------|-----------|
-| **Primary Port** | Interface, das die Anwendung **anbietet** | `GetOrderUseCase`, `ConfirmOrderUseCase` |
-| **Primary Adapter** | Ruft die Anwendung **auf** | REST Controller, CLI, Tests |
-
-```java
-// PRIMARY PORT - was die Anwendung ANBIETET
-public interface ConfirmOrderUseCase {
-    OrderConfirmationResponse confirmOrder(OrderId orderId);
-}
-
-// PRIMARY ADAPTER - wer die Anwendung AUFRUFT
-public class OrderController {
-    private final ConfirmOrderUseCase confirmOrderUseCase;  // ← Port!
-
-    public OrderConfirmationResponse confirmOrder(Long id) {
-        return confirmOrderUseCase.confirmOrder(OrderId.of(id));
-    }
-}
-```
-
-### Secondary (Driven) - "Was wird von der Anwendung getrieben?"
-
-| Begriff | Bedeutung | Beispiele |
-|---------|-----------|-----------|
-| **Secondary Port** | Interface, das die Anwendung **benötigt** | `LoadOrderPort`, `SendNotificationPort` |
-| **Secondary Adapter** | **Implementiert** den Port | DB Repository, Email Service |
-
-```java
-// SECONDARY PORT - was die Anwendung BENÖTIGT
-public interface LoadOrderPort {
-    Optional<Order> loadById(OrderId orderId);
-}
-
-// SECONDARY ADAPTER - wer den Port IMPLEMENTIERT
-public class OrderPersistenceAdapter implements LoadOrderPort {
-    @Override
-    public Optional<Order> loadById(OrderId orderId) {
-        // DB-Zugriff hier
-    }
-}
-```
-
-### Merkregel
-
+**Merkregel:**
 ```
 PRIMARY = Eingang  → "Wer ruft uns auf?"  → Input Ports
 SECONDARY = Ausgang → "Wen rufen wir auf?" → Output Ports
 ```
 
----
-
-## 3. Von Layered zu Hexagonal
-
-### Layered (zur Erinnerung)
+### Gegenüberstellung: Layered vs Hexagonal
 
 ```mermaid
 graph TB
-    subgraph "LAYERED"
-        P["Presentation<br/>(Controller)"]
-        S["Service<br/>(Business Logic)"]
-        R["Repository<br/>(Data Access)"]
-        M["Model<br/>(Entities)"]
-
-        P --> S --> R --> M
+    subgraph Layered ["LAYERED"]
+        direction TB
+        LP[Presentation]
+        LS[Service]
+        LR[Repository]
+        LM[Model]
+        LP --> LS --> LR --> LM
     end
 
-    style P fill:#e3f2fd
-    style S fill:#fff3e0
-    style R fill:#f3e5f5
-    style M fill:#e8f5e9
-```
-
-### Hexagonal
-
-```mermaid
-graph TB
-    subgraph "HEXAGONAL"
-        subgraph Adapters ["ADAPTERS"]
-            PA["Primary Adapters<br/>(Controller)"]
-            SA["Secondary Adapters<br/>(DB, Email)"]
+    subgraph Hexagonal ["HEXAGONAL"]
+        direction TB
+        subgraph HA ["Adapters"]
+            HPA[Primary Adapters]
+            HSA[Secondary Adapters]
+        end
+        subgraph HAP ["Application"]
+            HIP[Input Ports]
+            HS[Service]
+            HOP[Output Ports]
+        end
+        subgraph HD ["Domain"]
+            HM[Entities]
         end
 
-        subgraph Application ["APPLICATION"]
-            IP["Input Ports"]
-            Service["Service"]
-            OP["Output Ports"]
-        end
-
-        subgraph Domain ["DOMAIN"]
-            Entities["Entities, Value Objects"]
-            DS["Domain Services"]
-        end
-
-        PA --> IP
-        IP --> Service
-        Service --> OP
-        Service --> Domain
-        SA -.->|"impl"| OP
+        HPA --> HIP
+        HIP --> HS
+        HS --> HOP
+        HS --> HD
+        HSA -.->|impl| HOP
     end
 
-    style Domain fill:#c8e6c9
-    style Application fill:#fff9c4
-    style Adapters fill:#e3f2fd
+    style LM fill:#e8f5e9
+    style HD fill:#c8e6c9,stroke:#388e3c,stroke-width:3px
 ```
 
-### Was landet wo?
+**Wo landet was?**
 
-| Layered | Hexagonal | Erklärung |
-|---------|-----------|-----------|
-| Controller | **Primary Adapter** | Ruft Input Ports auf |
-| OrderService | **Application Service** | Implementiert Input Ports |
-| - | **Input Port** | Interface für Use Cases |
-| - | **Output Port** | Interface für externe Systeme |
-| OrderRepository (konkret) | **Secondary Adapter** | Implementiert Output Ports |
-| Model | **Domain** | Entities, Value Objects |
+| Komponente | Layered | Hexagonal |
+|------------|---------|-----------|
+| Controller | Presentation | **Primary Adapter** |
+| OrderService | Service | **Application Service** (implementiert Input Ports) |
+| Repository Interface | - | **Output Port** |
+| Repository Impl | Repository (konkret) | **Secondary Adapter** |
+| Order, Money | Model | **Domain** |
 
 ---
 
-## 4. Die Ports im Detail
+## 4. Schicht für Schicht: Der Umbau
 
-### Input Ports (Primary Ports)
+Lass uns Layered zu Hexagonal umbauen - Schritt für Schritt.
 
-Input Ports definieren die **Use Cases** deiner Anwendung:
+### Schritt 1: Domain definieren (der Kern)
+
+Der Domain-Kern enthält deine **Geschäftsobjekte** - ohne jegliche Abhängigkeiten!
+
+**Layered Model** → **Hexagonal Domain**
+
+```mermaid
+graph LR
+    subgraph Layered
+        LM["model/<br/>Order.java<br/>Money.java"]
+    end
+
+    subgraph Hexagonal
+        HD["domain/model/<br/>Order.java<br/>Money.java"]
+    end
+
+    LM -->|"wird zu"| HD
+
+    style HD fill:#c8e6c9,stroke:#388e3c,stroke-width:2px
+```
+
+**Code-Referenz:** [hexagonal/.../domain/model/Order.java](hexagonal/src/main/java/order/domain/model/Order.java)
+
+```java
+package order.domain.model;  // ← Beachte: "domain" Package!
+
+// KEINE Imports von außerhalb des Domain!
+// Keine Ports, keine Adapter, keine Frameworks
+
+public class Order {
+    private final OrderId id;
+    private final CustomerId customerId;
+    private List<OrderItem> items;
+    private OrderStatus status;
+
+    // Reine Geschäftslogik
+    public void confirm() {
+        if (items.isEmpty()) {
+            throw new EmptyOrderException(id);
+        }
+        this.status = OrderStatus.CONFIRMED;
+    }
+}
+```
+
+---
+
+### Schritt 2: Output Ports definieren (was brauchen wir?)
+
+Output Ports definieren, was die Anwendung **braucht** - ohne zu sagen **wie**:
+
+**Code-Referenz:** [hexagonal/.../port/output/](hexagonal/src/main/java/order/application/port/output/)
+
+```java
+// LoadOrderPort.java - Lesen
+package order.application.port.output;
+
+public interface LoadOrderPort {
+    Optional<Order> loadById(OrderId orderId);
+}
+```
+
+```java
+// SaveOrderPort.java - Schreiben
+public interface SaveOrderPort {
+    Order save(Order order);
+}
+```
+
+```java
+// SendNotificationPort.java - Benachrichtigung
+public interface SendNotificationPort {
+    void sendOrderConfirmation(CustomerId customerId, OrderConfirmation confirmation);
+}
+```
+
+**Warum separate Load/Save Ports?**
+
+| Single Repository | Separate Ports |
+|-------------------|----------------|
+| `findById()` + `save()` zusammen | `LoadOrderPort` + `SaveOrderPort` getrennt |
+| Einfacher | Flexibler (z.B. Read Replica) |
+| Üblich in Layered | Typisch für Hexagonal |
+
+---
+
+### Schritt 3: Input Ports definieren (Use Cases!)
+
+Input Ports definieren die **Use Cases** deiner Anwendung - das ist DER Hexagonal-Unterschied zu Onion:
 
 **Code-Referenz:** [hexagonal/.../port/input/](hexagonal/src/main/java/order/application/port/input/)
 
@@ -347,88 +535,126 @@ public interface ConfirmOrderUseCase {
 }
 ```
 
-**Der Service implementiert ALLE Input Ports:**
-
-```java
-public class OrderService implements GetOrderUseCase,
-                                      UpdateOrderUseCase,
-                                      ConfirmOrderUseCase {
-    // Implementiert alle Use Cases
-}
-```
-
-### Output Ports (Secondary Ports)
-
-Output Ports definieren, was die Anwendung **braucht** - ohne zu sagen **wie**:
-
-**Code-Referenz:** [hexagonal/.../port/output/](hexagonal/src/main/java/order/application/port/output/)
-
-```java
-// LoadOrderPort.java - Lesen
-public interface LoadOrderPort {
-    Optional<Order> loadById(OrderId orderId);
-}
-
-// SaveOrderPort.java - Schreiben
-public interface SaveOrderPort {
-    Order save(Order order);
-}
-
-// SendNotificationPort.java - Benachrichtigung
-public interface SendNotificationPort {
-    void sendOrderConfirmation(CustomerId customerId, OrderConfirmation confirmation);
-}
-
-// CheckOrderExistsPort.java - Externes System
-public interface CheckOrderExistsPort {
-    boolean existsInExternalSystem(OrderId orderId);
-}
-```
-
-### Warum separate Load/Save Ports?
-
-In Hexagonal trennt man oft **Lesen und Schreiben**:
-
-```mermaid
-graph LR
-    subgraph "CQRS-inspiriert"
-        LP[LoadOrderPort] -->|"lesen"| DB[(DB)]
-        SP[SaveOrderPort] -->|"schreiben"| DB
-    end
-```
-
-| Single Repository | Separate Ports |
-|-------------------|----------------|
-| `findById()` + `save()` zusammen | `LoadOrderPort` + `SaveOrderPort` getrennt |
-| Einfacher | Flexibler (z.B. Read Replica) |
-| Üblich in Layered | Typisch für Hexagonal |
+**Das ist der Hexagonal-Fokus:** Jeder Use Case hat sein eigenes Interface!
 
 ---
 
-## 5. Die Adapter im Detail
+### Schritt 4: Application Service (implementiert Input Ports)
 
-### Primary Adapters (Input Adapters)
+**Code-Referenz:** [hexagonal/.../service/OrderService.java](hexagonal/src/main/java/order/application/service/OrderService.java)
 
-Primary Adapters **rufen** die Anwendung auf:
+```java
+package order.application.service;
+
+// Importiert NUR Ports und Domain!
+import order.application.port.input.*;   // Input Ports
+import order.application.port.output.*;  // Output Ports
+import order.domain.model.*;
+
+public class OrderService implements GetOrderUseCase,
+                                      UpdateOrderUseCase,
+                                      ConfirmOrderUseCase {
+
+    // Hängt nur von OUTPUT PORTS ab!
+    private final LoadOrderPort loadOrderPort;
+    private final SaveOrderPort saveOrderPort;
+    private final SendNotificationPort sendNotificationPort;
+
+    public OrderService(
+            LoadOrderPort loadOrderPort,           // ← Port!
+            SaveOrderPort saveOrderPort,           // ← Port!
+            SendNotificationPort sendNotificationPort) {
+        this.loadOrderPort = loadOrderPort;
+        this.saveOrderPort = saveOrderPort;
+        this.sendNotificationPort = sendNotificationPort;
+    }
+
+    @Override
+    public OrderConfirmationResponse confirmOrder(OrderId orderId) {
+        Order order = loadOrderPort.loadById(orderId)
+            .orElseThrow(() -> new OrderNotFoundException(orderId));
+
+        order.confirm();
+
+        saveOrderPort.save(order);
+        sendNotificationPort.sendOrderConfirmation(...);
+
+        return mapper.toResponse(...);
+    }
+}
+```
+
+---
+
+### Schritt 5: Secondary Adapters (implementieren Output Ports)
+
+**Code-Referenz:** [hexagonal/.../adapter/output/persistence/OrderPersistenceAdapter.java](hexagonal/src/main/java/order/adapter/output/persistence/OrderPersistenceAdapter.java)
+
+```java
+package order.adapter.output.persistence;
+
+import order.application.port.output.LoadOrderPort;  // ← Importiert Port
+import order.application.port.output.SaveOrderPort;
+import order.domain.model.*;
+
+// Implementiert Output Ports
+public class OrderPersistenceAdapter implements LoadOrderPort, SaveOrderPort {
+
+    private final Map<Long, OrderEntity> database = new HashMap<>();
+
+    @Override
+    public Optional<Order> loadById(OrderId orderId) {
+        OrderEntity entity = database.get(orderId.value());
+        return Optional.ofNullable(entity).map(this::mapToDomain);
+    }
+
+    @Override
+    public Order save(Order order) {
+        OrderEntity entity = mapToEntity(order);
+        database.put(entity.id, entity);
+        return mapToDomain(entity);
+    }
+}
+```
+
+**Email Adapter:**
+
+```java
+package order.adapter.output.notification;
+
+import order.application.port.output.SendNotificationPort;
+
+public class EmailNotificationAdapter implements SendNotificationPort {
+
+    @Override
+    public void sendOrderConfirmation(CustomerId customerId, OrderConfirmation confirmation) {
+        String email = customerId.value() + "@example.com";
+        System.out.printf("[EMAIL] Sende an %s%n", email);
+    }
+}
+```
+
+---
+
+### Schritt 6: Primary Adapter (Controller)
 
 **Code-Referenz:** [hexagonal/.../adapter/input/rest/OrderController.java](hexagonal/src/main/java/order/adapter/input/rest/OrderController.java)
 
 ```java
 package order.adapter.input.rest;
 
+import order.application.port.input.*;  // ← Nur Input Ports!
+
 public class OrderController {
 
     // Kennt nur die INPUT PORTS - nicht den konkreten Service!
     private final GetOrderUseCase getOrderUseCase;
-    private final UpdateOrderUseCase updateOrderUseCase;
     private final ConfirmOrderUseCase confirmOrderUseCase;
 
     public OrderController(
             GetOrderUseCase getOrderUseCase,           // ← Interface!
-            UpdateOrderUseCase updateOrderUseCase,     // ← Interface!
             ConfirmOrderUseCase confirmOrderUseCase) { // ← Interface!
         this.getOrderUseCase = getOrderUseCase;
-        this.updateOrderUseCase = updateOrderUseCase;
         this.confirmOrderUseCase = confirmOrderUseCase;
     }
 
@@ -444,7 +670,7 @@ public class OrderController {
 }
 ```
 
-**Warum drei separate Interfaces statt einem Service?**
+**Warum separate Use Case Interfaces?**
 
 | Ein Service | Separate Use Cases |
 |-------------|-------------------|
@@ -452,114 +678,31 @@ public class OrderController {
 | `OrderService` = God Class | Interfaces = klare Verträge |
 | Schwer zu mocken | Einfach zu mocken |
 
-### Secondary Adapters (Output Adapters)
-
-Secondary Adapters **implementieren** die Output Ports:
-
-**Code-Referenz:** [hexagonal/.../adapter/output/persistence/OrderPersistenceAdapter.java](hexagonal/src/main/java/order/adapter/output/persistence/OrderPersistenceAdapter.java)
-
-```java
-package order.adapter.output.persistence;
-
-// Implementiert BEIDE Ports (Load + Save)
-public class OrderPersistenceAdapter implements LoadOrderPort, SaveOrderPort {
-
-    private final Map<Long, OrderEntity> database = new HashMap<>();
-
-    @Override
-    public Optional<Order> loadById(OrderId orderId) {
-        OrderEntity entity = database.get(orderId.value());
-        if (entity == null) {
-            return Optional.empty();
-        }
-        return Optional.of(mapToDomain(entity));  // ← Entity → Domain
-    }
-
-    @Override
-    public Order save(Order order) {
-        OrderEntity entity = mapToEntity(order);  // ← Domain → Entity
-        database.put(entity.id, entity);
-        return mapToDomain(entity);
-    }
-
-    // Mapping zwischen Domain und Persistence
-    private Order mapToDomain(OrderEntity entity) { ... }
-    private OrderEntity mapToEntity(Order order) { ... }
-}
-```
-
-**Code-Referenz:** [hexagonal/.../adapter/output/notification/EmailNotificationAdapter.java](hexagonal/src/main/java/order/adapter/output/notification/EmailNotificationAdapter.java)
-
-```java
-package order.adapter.output.notification;
-
-public class EmailNotificationAdapter implements SendNotificationPort {
-
-    @Override
-    public void sendOrderConfirmation(CustomerId customerId, OrderConfirmation confirmation) {
-        // Hier kommt die echte Email-Logik
-        String email = customerId.value() + "@example.com";
-        System.out.printf("[EMAIL] Sende an %s%n", email);
-    }
-}
-```
-
 ---
 
-## 6. Code-Vergleich: Layered vs Hexagonal
+## 5. Code-Vergleich: Vorher/Nachher
 
 ### Der Service
 
 **LAYERED:**
 
 ```java
-// layered/src/main/java/order/service/OrderService.java
-
 public class OrderService {
-    private final OrderRepository orderRepository;        // ← Konkrete Klasse!
-    private final EmailService emailService;              // ← Konkrete Klasse!
-    private final ProductRepository productRepository;    // ← Fremdes Modul!
-
-    public OrderConfirmationResponse confirmOrder(OrderId orderId) {
-        Order order = orderRepository.findById(orderId)   // ← Direkt auf Impl
-            .orElseThrow(() -> new OrderNotFoundException(orderId));
-
-        order.confirm();
-
-        orderRepository.save(order);
-        emailService.sendOrderConfirmation(...);          // ← Direkt auf Impl
-
-        return mapper.toResponse(...);
-    }
-}
+    private final OrderRepository orderRepository;        // Konkrete Klasse!
+    private final EmailService emailService;              // Konkrete Klasse!
+    private final ProductRepository productRepository;    // Fremdes Modul!
 ```
 
 **HEXAGONAL:**
 
 ```java
-// hexagonal/src/main/java/order/application/service/OrderService.java
-
 public class OrderService implements GetOrderUseCase,
                                       UpdateOrderUseCase,
                                       ConfirmOrderUseCase {
 
-    private final LoadOrderPort loadOrderPort;              // ← Port (Interface)!
-    private final SaveOrderPort saveOrderPort;              // ← Port (Interface)!
-    private final SendNotificationPort sendNotificationPort; // ← Port (Interface)!
-
-    @Override
-    public OrderConfirmationResponse confirmOrder(OrderId orderId) {
-        Order order = loadOrderPort.loadById(orderId)       // ← Über Port
-            .orElseThrow(() -> new OrderNotFoundException(orderId));
-
-        order.confirm();
-
-        saveOrderPort.save(order);                          // ← Über Port
-        sendNotificationPort.sendOrderConfirmation(...);    // ← Über Port
-
-        return mapper.toResponse(...);
-    }
-}
+    private final LoadOrderPort loadOrderPort;              // Port!
+    private final SaveOrderPort saveOrderPort;              // Port!
+    private final SendNotificationPort sendNotificationPort; // Port!
 ```
 
 ### Der Unterschied im Bild
@@ -601,7 +744,7 @@ graph TB
 
 ```java
 public class OrderController {
-    private final OrderService orderService;  // ← Konkrete Klasse
+    private final OrderService orderService;  // ← Konkrete Klasse!
 
     public OrderResponse getOrder(Long id) {
         return orderService.getOrder(id);
@@ -623,6 +766,89 @@ public class OrderController {
 
 ---
 
+## 6. Die Dependency Rule
+
+### Die goldene Regel von Hexagonal:
+
+> **Adapter hängen von Ports ab - niemals umgekehrt!**
+> **Die Anwendung kennt nur Ports - niemals Adapter!**
+
+```mermaid
+graph TB
+    subgraph "Die Hexagonal-Regel"
+        PA["Primary Adapter<br/>(Controller)"]
+        IP["Input Port"]
+        Service["Application Service"]
+        OP["Output Port"]
+        SA["Secondary Adapter<br/>(DB, Email)"]
+    end
+
+    PA -->|"✅ ruft auf"| IP
+    IP -->|"✅ implementiert von"| Service
+    Service -->|"✅ nutzt"| OP
+    SA -->|"✅ implementiert"| OP
+
+    Service -.->|"❌ NIEMALS"| PA
+    Service -.->|"❌ NIEMALS"| SA
+    OP -.->|"❌ NIEMALS"| SA
+
+    style IP fill:#fff9c4
+    style OP fill:#fff9c4
+```
+
+### Was bedeutet das konkret?
+
+| Komponente | Darf importieren | Darf NICHT importieren |
+|------------|------------------|------------------------|
+| **Domain** | Nichts (außer Java stdlib) | Ports, Adapter |
+| **Application (Service)** | Domain, Output Ports | Adapter |
+| **Primary Adapter** | Input Ports | Service direkt, andere Adapter |
+| **Secondary Adapter** | Output Ports, Domain | Service, andere Adapter |
+
+### Beispiel: Import-Analyse
+
+**Domain:**
+```java
+package order.domain.model;
+
+// ✅ Nur Java Standard Library
+import java.util.List;
+
+// ❌ NIEMALS Ports oder Adapter
+// import order.application.port.output.LoadOrderPort;  // VERBOTEN!
+```
+
+**Application Service:**
+```java
+package order.application.service;
+
+// ✅ Input Ports (implementieren)
+import order.application.port.input.*;
+
+// ✅ Output Ports (nutzen)
+import order.application.port.output.*;
+
+// ✅ Domain
+import order.domain.model.*;
+
+// ❌ NIEMALS Adapter!
+// import order.adapter.output.persistence.OrderPersistenceAdapter;  // VERBOTEN!
+```
+
+**Secondary Adapter:**
+```java
+package order.adapter.output.persistence;
+
+// ✅ Output Ports (implementieren)
+import order.application.port.output.LoadOrderPort;
+import order.application.port.output.SaveOrderPort;
+
+// ✅ Domain (für Mapping)
+import order.domain.model.*;
+```
+
+---
+
 ## 7. Praktisches Beispiel: Order bestätigen
 
 ### Der Flow in Hexagonal
@@ -639,7 +865,7 @@ sequenceDiagram
     participant EA as EmailAdapter<br/>(Secondary Adapter)
 
     C->>IP: confirmOrder(id)
-    Note over C,IP: Primary Port Aufruf
+    Note over C,IP: Input Port Aufruf
 
     IP->>S: (implementiert von)
     S->>LP: loadById(id)
@@ -717,83 +943,49 @@ public class OrderService implements GetOrderUseCase, UpdateOrderUseCase, Confir
 
 ---
 
-## 8. Wann Hexagonal verwenden?
+## 8. Zusammenfassung
 
-### Hexagonal passt gut wenn:
-
-| Situation | Warum Hexagonal? |
-|-----------|-----------------|
-| **Viele externe Integrationen** | Jede Integration = ein Port |
-| **Microservices** | Klare Grenzen durch Ports |
-| **Technologie-Wechsel absehbar** | Nur Adapter tauschen |
-| **Hohe Testanforderungen** | Ports mocken ist einfach |
-| **Team-Arbeit** | Teams arbeiten an verschiedenen Adaptern |
-
-### Hexagonal ist Overkill wenn:
-
-| Situation | Warum nicht Hexagonal? |
-|-----------|------------------------|
-| **Kleine Projekte** | Zu viel Boilerplate |
-| **Wenig externe Systeme** | Ports ohne echten Nutzen |
-| **Prototypen** | Zu viel Abstraktion |
-| **Keine wechselnden Anforderungen** | Flexibilität nicht gebraucht |
-
-### Vergleich mit anderen Architekturen
-
-| Aspekt | Layered | Hexagonal | Onion |
-|--------|---------|-----------|-------|
-| **Terminologie** | Schichten | Ports & Adapters | Konzentrische Schichten |
-| **Fokus** | Einfachheit | Austauschbarkeit | Domain im Zentrum |
-| **Ports explizit** | Nein | **Ja** | Interfaces, aber nicht "Ports" genannt |
-| **Primary/Secondary** | Nein | **Ja** | Nein |
-| **Use Case Interfaces** | Nein | **Ja** | Optional |
-| **Komplexität** | Niedrig | Hoch | Mittel-Hoch |
-
----
-
-## 9. Zusammenfassung
-
-### Die Hexagonal-Terminologie
+### Die Transformation: Layered → Hexagonal
 
 ```mermaid
-graph TB
-    subgraph "🔷 HEXAGONAL"
-        subgraph Primary ["PRIMARY (Driving)"]
-            PA["Primary Adapter<br/>(Controller)"]
-            IP["Input Port<br/>(Use Case Interface)"]
-        end
-
-        subgraph Core ["APPLICATION + DOMAIN"]
-            Service["Application Service"]
-            Domain["Domain"]
-        end
-
-        subgraph Secondary ["SECONDARY (Driven)"]
-            OP["Output Port<br/>(Repository Interface)"]
-            SA["Secondary Adapter<br/>(DB, Email)"]
-        end
-
-        PA --> IP
-        IP --> Service
-        Service --> Domain
-        Service --> OP
-        SA -.->|"impl"| OP
+graph LR
+    subgraph Layered ["LAYERED"]
+        direction TB
+        LP[Presentation]
+        LS[Service]
+        LR[Repository]
+        LM[Model]
+        LP --> LS --> LR --> LM
     end
 
-    style Core fill:#c8e6c9
-    style Primary fill:#e3f2fd
-    style Secondary fill:#e3f2fd
+    subgraph Transform ["→"]
+        T["🔄"]
+    end
+
+    subgraph Hexagonal ["HEXAGONAL"]
+        direction TB
+        HA[Adapters<br/>Primary + Secondary]
+        HAP[Application<br/>Input Ports + Service + Output Ports]
+        HD[Domain<br/>Entities, VOs]
+
+        HA --> HAP --> HD
+    end
+
+    Layered --> Transform --> Hexagonal
+
+    style LM fill:#e8f5e9
+    style HD fill:#c8e6c9,stroke:#388e3c,stroke-width:3px
 ```
 
 ### Merksätze
 
 1. **"Ports sind Interfaces"**
    - Input Ports = was die Anwendung anbietet (Use Cases)
-   - Output Ports = was die Anwendung braucht
+   - Output Ports = was die Anwendung braucht (Repository, Email)
 
 2. **"Adapter sind Implementierungen"**
-   - Primary Adapters rufen Ports auf (Controller)
-   - Secondary Adapters implementieren Ports (DB, Email)
+   - Primary Adapters rufen Input Ports auf (Controller)
+   - Secondary Adapters implementieren Output Ports (DB, Email)
 
 3. **"Primary = rein, Secondary = raus"**
    - Primary: Wer treibt die Anwendung?
@@ -803,16 +995,17 @@ graph TB
    - Kein Import von Adaptern
    - Nur Interfaces
 
-### Dateistruktur
+### Schnellreferenz: Dateistruktur
 
 ```
 hexagonal/src/main/java/order/
 │
-├── domain/                              ← 💚 DOMAIN
+├── domain/                              ← 💚 DOMAIN (Kern)
 │   ├── model/
 │   │   ├── Order.java                   ← Aggregate Root
 │   │   ├── OrderItem.java
-│   │   └── Money.java                   ← Value Object
+│   │   ├── Money.java                   ← Value Object
+│   │   └── OrderId.java                 ← Value Object
 │   ├── exception/
 │   │   └── OrderNotFoundException.java
 │   └── service/
@@ -847,14 +1040,25 @@ hexagonal/src/main/java/order/
         └── OrderConfiguration.java
 ```
 
-### Der Kern-Unterschied zu Layered
+### Wann Hexagonal verwenden?
 
-| Frage | Layered | Hexagonal |
-|-------|---------|-----------|
-| **Wie greift Controller auf Service zu?** | Direkt | Über Input Port (Interface) |
-| **Wie greift Service auf Repository zu?** | Oft direkt | Über Output Port (Interface) |
-| **Wer definiert Schnittstellen?** | Framework oder niemand | Du selbst (Ports) |
-| **Austauschbarkeit** | Schwierig | Einfach (neuer Adapter) |
+| Situation | Empfehlung |
+|-----------|------------|
+| Kleine Projekte / MVPs | Layered reicht |
+| Komplexe Geschäftslogik | ✅ Hexagonal |
+| Viele externe Integrationen | ✅ Hexagonal |
+| Hohe Testanforderungen | ✅ Hexagonal |
+| Microservices | ✅ Hexagonal |
+| Team mit wenig Erfahrung | Layered (erstmal) |
+
+### Der echte Kern-Unterschied (Hexagonal vs Onion)
+
+| Frage | Onion | Hexagonal |
+|-------|-------|-----------|
+| **Use Cases als Interfaces?** | Optional | **Ja, Input Ports!** |
+| **Primary/Secondary?** | Nein | **Ja** |
+| **Fokus** | Schichten zum Kern | Ports & Adapters |
+| **Terminologie** | Core, Application, Infrastructure | Domain, Application, Adapter |
 
 ### Fairerweise
 
@@ -866,12 +1070,171 @@ hexagonal/src/main/java/order/
 
 ---
 
-## Weiterführende Dateien
+## 9. Wie Hexagonal die Probleme löst
+
+Hier nochmal alle Probleme aus Kapitel 2 - und wie Hexagonal sie löst:
+
+---
+
+<a id="lösung-1-abhängigkeiten-zeigen-nach-innen"></a>
+### Lösung 1: Abhängigkeiten zeigen nach INNEN
+[← Zurück zum Problem](#problem-1-layered)
+
+**Layered:** Abhängigkeiten zeigen nach unten (Service → Repository → DB)
+
+**Hexagonal:** Adapter implementieren Ports - Abhängigkeiten zeigen **nach innen**:
+
+```mermaid
+graph LR
+    subgraph "Hexagonal: Adapter → Ports"
+        PA[Primary Adapter] -->|"ruft auf"| IP[Input Port]
+        SA[Secondary Adapter] -.->|"implementiert"| OP[Output Port]
+    end
+
+    style IP fill:#fff9c4
+    style OP fill:#fff9c4
+```
+
+**Code-Referenz:** [hexagonal/.../OrderPersistenceAdapter.java](hexagonal/src/main/java/order/adapter/output/persistence/OrderPersistenceAdapter.java)
+
+---
+
+<a id="lösung-2-business-logic-ist-der-kern"></a>
+### Lösung 2: Business Logic ist der KERN
+[← Zurück zum Problem](#problem-2-layered)
+
+**Layered:** Business Logic ist "gefangen" zwischen Presentation und Repository.
+
+**Hexagonal:** Domain ist das **Zentrum** - Adapter sind austauschbar:
+
+```mermaid
+graph TB
+    subgraph "Der geschützte Kern"
+        Domain["💚 DOMAIN<br/>Order, Money, OrderItem<br/>KEINE Abhängigkeiten!"]
+    end
+
+    Adapter[Adapters] --> App[Application] --> Domain
+
+    style Domain fill:#c8e6c9,stroke:#388e3c,stroke-width:3px
+```
+
+---
+
+<a id="lösung-3-ports-definieren-klare-verträge"></a>
+### Lösung 3: Ports definieren klare Verträge
+[← Zurück zum Problem](#problem-3-layered)
+
+**Layered:** Keine Interfaces → Implizite Verträge.
+
+**Hexagonal:** Jeder Port ist ein **expliziter Vertrag**:
+
+```java
+// Output Port - klarer Vertrag
+public interface LoadOrderPort {
+    Optional<Order> loadById(OrderId orderId);
+}
+
+// Input Port - klarer Use Case
+public interface ConfirmOrderUseCase {
+    OrderConfirmationResponse confirmOrder(OrderId orderId);
+}
+```
+
+---
+
+<a id="lösung-4-adapter-sind-austauschbar"></a>
+### Lösung 4: Adapter sind AUSTAUSCHBAR
+[← Zurück zum Problem](#problem-4-layered)
+
+**Layered:** Komponenten austauschen erfordert massive Änderungen.
+
+**Hexagonal:** Neuer Adapter, fertig:
+
+```java
+// Heute: In-Memory
+public class InMemoryOrderAdapter implements LoadOrderPort, SaveOrderPort { ... }
+
+// Morgen: PostgreSQL
+public class PostgresOrderAdapter implements LoadOrderPort, SaveOrderPort { ... }
+
+// Übermorgen: MongoDB
+public class MongoOrderAdapter implements LoadOrderPort, SaveOrderPort { ... }
+```
+
+```mermaid
+graph TB
+    App[Application Service]
+    LP["«interface»<br/>LoadOrderPort"]
+
+    Impl1[InMemoryAdapter]
+    Impl2[PostgresAdapter]
+    Impl3[MongoAdapter]
+
+    App --> LP
+    Impl1 -.->|impl| LP
+    Impl2 -.->|impl| LP
+    Impl3 -.->|impl| LP
+
+    style LP fill:#fff9c4
+```
+
+---
+
+<a id="lösung-5-input-ports-machen-use-cases-explizit"></a>
+### Lösung 5: Input Ports machen Use Cases EXPLIZIT
+[← Zurück zum Problem](#problem-5-layered)
+
+**Layered:** Ein großer Service mit vielen Methoden.
+
+**Hexagonal:** Jeder Use Case hat sein eigenes Interface:
+
+```java
+// Statt einem großen Service...
+public interface GetOrderUseCase {
+    OrderResponse getOrder(OrderId orderId);
+}
+
+public interface UpdateOrderUseCase {
+    OrderResponse updateOrder(OrderId orderId, UpdateOrderCommand command);
+}
+
+public interface ConfirmOrderUseCase {
+    OrderConfirmationResponse confirmOrder(OrderId orderId);
+}
+```
+
+**Vorteil:** Controller kennt nur die Use Cases, die er braucht:
+
+```java
+public class OrderController {
+    // Nur die benötigten Use Cases!
+    private final GetOrderUseCase getOrderUseCase;
+    private final ConfirmOrderUseCase confirmOrderUseCase;
+    // NICHT: private final OrderService orderService; (kennt alles)
+}
+```
+
+---
+
+## Weiterführende Dateien in diesem Projekt
 
 - **Hexagonal Beispiel komplett:** [hexagonal/](hexagonal/)
 - **Layered zum Vergleich:** [layered/](layered/)
 - **Onion (verwandte Architektur):** [onion/](onion/)
 - **Clean Architecture:** [clean/](clean/)
+
+---
+
+### Pragmatismus-Hinweis
+
+> **Wichtig:** Hexagonal ist ein Werkzeug, kein Dogma.
+>
+> - Ein funktionierendes Layered-Projekt ist besser als ein nie fertiges Hexagonal-Projekt
+> - Du kannst Hexagonal schrittweise einführen: Erst Output Ports, dann Input Ports
+> - Nicht jeder Service braucht alle Ports - starte mit den wichtigsten
+> - Primary/Secondary Unterscheidung ist konzeptuell - die Ordnerstruktur kann variieren
+>
+> **Starte einfach, refactore wenn es wehtut.**
 
 ---
 

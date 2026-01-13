@@ -119,6 +119,7 @@ ddd/
 | Tutorial | Thema |
 |----------|-------|
 | [tutorialOverview.md](tutorialOverview.md) | **Gesamtüberblick:** Was gehört zusammen? SOLID, Übergänge, Entscheidungshilfen |
+| [tutorialDDD.md](tutorialDDD.md) | **DDD-Begriffe:** Entity, Value Object, Aggregate, Bounded Context |
 | [tutorialOnion.md](tutorialOnion.md) | Von Layered zu Onion - Schritt für Schritt |
 | [tutorialHexagonal.md](tutorialHexagonal.md) | Hexagonal Architecture - Ports & Adapters |
 | [tutorialRichVsAnemic.md](tutorialRichVsAnemic.md) | Rich vs Anemic Domain Model |
