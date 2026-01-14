@@ -140,8 +140,8 @@ zeigen nach UNTEN                    │  └───────────�
 
 | Aspekt | Layered | Onion/Hexagonal |
 |--------|---------|-----------------|
-| **Wer definiert Interfaces?** | Framework (JpaRepository) oder niemand | Du selbst, im Application Layer |
-| **Domain kennt Infrastructure?** | Nicht verboten | Architektonisch verboten |
+| **Wer definiert Interfaces?** | Framework (JpaRepository) oder du selbst | Du selbst, typischerweise im Application Layer |
+| **Domain kennt Infrastructure?** | Kann vermieden werden, wird aber nicht immer aktiv verhindert | Ziel: Domain ist unabhängig; Abhängigkeiten zeigen nach innen |
 | **Testbarkeit** | Oft nur mit Mocking-Framework | Einfache Test-Implementierungen |
 
 ---
@@ -617,7 +617,6 @@ String city = Optional.ofNullable(order.getCustomer())
            ▼                                   ▼
     Getter-Ketten                    In Mappern/DTOs okay
     in Business-Logik                ─────────────────────
-    ─────────────────                │                   │
     │               │                │ Hier darf man     │
     │  Hier wirklich│                │ order.getCustomer │
     │  vermeiden    │                │ ().getName()      │
@@ -785,7 +784,6 @@ CHAOS                                                      OVER-ENGINEERING
 │ God-Class     │   - Lesbar           │  Interface    │ Factory   │
 │ mit allem     │   - Testbar wo nötig │  - Auch DTOs  │ Provider  │
 │               │   - Einfach genug    │  - Auch Utils │ Singleton │
-│               │                       │               │ Builder   │
 └─────┴───────────┴─────────────────────┴───────────────┴───────────┘
         │                   │                   │
         │                   │                   │

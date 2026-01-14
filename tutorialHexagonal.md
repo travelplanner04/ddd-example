@@ -317,7 +317,8 @@ graph TB
 
 ### Was sind Ports?
 
-> **Port = Interface** - Eine definierte Schnittstelle, über die die Anwendung kommuniziert.
+> **Port = Schnittstelle** - Eine definierte Schnittstelle,  fcber die die Anwendung kommuniziert.
+> In OO ist das meistens ein Interface.
 
 Es gibt zwei Arten:
 
@@ -508,13 +509,14 @@ public interface SendNotificationPort {
 |-------------------|----------------|
 | `findById()` + `save()` zusammen | `LoadOrderPort` + `SaveOrderPort` getrennt |
 | Einfacher | Flexibler (z.B. Read Replica) |
-| Üblich in Layered | Typisch für Hexagonal |
+| Üblich in Layered | Häufig in Ports & Adapters als CQRS-lite genutzt |
 
 ---
 
 ### Schritt 3: Input Ports definieren (Use Cases!)
 
-Input Ports definieren die **Use Cases** deiner Anwendung - das ist DER Hexagonal-Unterschied zu Onion:
+Input Ports definieren die **Use Cases** deiner Anwendung.
+Das ist nicht exclusiv „Hexagonal vs Onion“, sondern ein typischer Fokus von Ports-&-Adapters und Clean: Use Cases als explizite Verträge statt „ein Service macht alles“.
 
 **Code-Referenz:** [hexagonal/.../port/input/](hexagonal/src/main/java/order/application/port/input/)
 
@@ -535,7 +537,9 @@ public interface ConfirmOrderUseCase {
 }
 ```
 
-**Das ist der Hexagonal-Fokus:** Jeder Use Case hat sein eigenes Interface!
+**Merke:** Du kannst Use Cases auch in einem Interface bündeln.
+Viele kleine Ports sind gut, wenn du klare Verträge und testbare Abhängigkeiten willst.
+Wenn dein Projekt dadurch unübersichtlich wird, ist Bündeln oft die bessere Wahl.
 
 ---
 
@@ -1055,8 +1059,8 @@ hexagonal/src/main/java/order/
 
 | Frage | Onion | Hexagonal |
 |-------|-------|-----------|
-| **Use Cases als Interfaces?** | Optional | **Ja, Input Ports!** |
-| **Primary/Secondary?** | Nein | **Ja** |
+| **Use Cases als Interfaces?** | Möglich (optional) | Häufig so umgesetzt (Input Ports) |
+| **Primary/Secondary?** | Nicht zwingend (anderer Fokus) | Übliche Begriffe in Ports & Adapters |
 | **Fokus** | Schichten zum Kern | Ports & Adapters |
 | **Terminologie** | Core, Application, Infrastructure | Domain, Application, Adapter |
 
